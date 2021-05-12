@@ -3,6 +3,7 @@ package poly
 import (
 	"container/heap"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
@@ -1354,4 +1355,312 @@ func bulge_nuc_score(nuci int) float64 {
 // parameters: nucs[i], nucs[j]
 func internal_nuc_score(nuci, nucj int) float64 {
 	return internal_1x1_nucleotides[nuci*NOTON+nucj]
+}
+
+func CalculateMfe(sequence, structure string) {
+	real_en = vrna_eval_structure_cstr(vc, structure, opt->verbose, o_stream->data);
+  cov_en = vrna_eval_covar_structure(vc, structure);
+
+	return DBL_ROUND(real_en - cov_en, 2)
+}
+
+
+func vrna_eval_structure_cstr(sequence, structure string) {
+	len_seq := len(sequence)
+	len_structure := len(structure)
+  if len_seq != len_structure {
+		panic(
+			fmt.Sprintf("Length of sequence (%v) != Length of structure (%v)", len_seq, len_structure)
+		)
+    // return (float)INF / 100.;
+  }
+
+  var pt []int = vrna_ptable_from_string(structure)
+  float en  = wrap_eval_structure(vc, structure, pt, output_stream, verbosity_level);
+
+  free(pt);
+  return en;
+}
+
+
+func vrna_ptable(structure string) []int {
+  return vrna_ptable_from_string(structure)
+}
+
+const SHRT_MAX int = 32767
+
+func vrna_ptable_from_string(str string) int[] {
+	var pairs [3]rune
+	var pt []int
+	var i, n uint64
+
+	n = len(str)
+
+	if n > SHRT_MAX {
+		panic(
+			fmt.Sprintf("vrna_ptable_from_string: Structure too long to be converted to pair table (n=%v, max=%v)", n, SHRT_MAX)
+		)
+		return nil
+	}
+
+	pt = make([]int, n + 2)
+	pt[0] = (int)n
+
+
+	pt, err = extract_pairs(pt, str, []rune("()"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return pt
+}
+
+
+/* requires that pt[0] already contains the length of the string! */
+func extract_pairs(pt []int, structure string, pair []rune) ([]int, error) {
+  var ptr []rune = []rune(structure)
+  var open, close rune
+  var stack []int
+  var i, j, n uint64
+  var hx, ptr_idx int
+
+  n     = (uint64)pt[0]
+	stack = make([]int, n + 1)
+
+  open  = pair[0]
+  close = pair[1]
+
+  for hx, i, ptr_idx := 0, 1, 0; i <= n && ptr_idx < len(ptr); ptr_idx++, i++ {
+    if ptr[ptr_idx] == open {
+      stack[hx++] = i
+    } else if ptr[ptr_idx] == close {
+      j = stack[--hx]
+
+      if hx < 0 {
+        // vrna_message_warning("%s\nunbalanced brackets '%2s' found while extracting base pairs",
+        //                      );
+				return nil, errors.New(fmt.Sprintf("%v\nunbalanced brackets '%v' found while extracting base pairs", structure,
+				pair))
+        // free(stack);
+        // return 0;
+      }
+
+      pt[i] = j
+      pt[j] = i
+    }
+  }
+
+  // free(stack);
+
+  if hx != 0 {
+    return nil, errors.New(fmt.Sprintf("%v\nunbalanced brackets '%v' found while extracting base pairs", structure,
+				pair))
+    // return 0;
+  }
+
+	return pt, nil
+  // return 1; /* success */
+}
+
+func wrap_eval_structure(sequence, structure string, pt []int) float64 {
+  var res, gq, L int
+	var l [3]int
+  var energy float64
+
+  energy                          = math.Inf(1) / 100.
+  // gq                              = vc->params->model_details.gquad;
+	gq = 1 // can be 0
+  // vc->params->model_details.gquad = 0;
+
+
+	// can add support for circular strands with this
+	// if (vc->params->model_details.circ)
+	//   res = eval_circ_pt(vc, pt, output_stream, verbosity);
+	// else
+	res = eval_pt(vc, pt, output_stream, verbosity);
+
+      vc->params->model_details.gquad = gq;
+
+      if (gq && (parse_gquad(structure, &L, l) > 0)) {
+        if (verbosity > 0)
+          vrna_cstr_print_eval_sd_corr(output_stream);
+
+        res += en_corr_of_loop_gquad(vc, 1, vc->length, structure, pt, output_stream, verbosity);
+      }
+
+      energy = (float)res / 100.;
+
+
+
+
+  return energy;
+}
+
+
+
+func eval_pt(sequence string, pt []int) int {
+  var sn []uint64
+  var i, length, energy int
+
+  length  = len(sequence);
+  sn      = vc->strand_number; // What does this default to, and where is it used?
+
+  vrna_sc_prepare(vc, VRNA_OPTION_MFE);
+
+  energy = vc->params->model_details.backtrack_type == 'M' ?
+           energy_of_ml_pt(vc, 0, pt) :
+           energy_of_extLoop_pt(vc, 0, pt);
+
+  if (verbosity_level > 0) {
+    vrna_cstr_print_eval_ext_loop(output_stream,
+                                  (vc->type == VRNA_FC_TYPE_COMPARATIVE) ?
+                                  (int)energy / (int)vc->n_seq :
+                                  energy);
+  }
+
+  for (i = 1; i <= length; i++) {
+    if (pt[i] == 0)
+      continue;
+
+    energy  += stack_energy(vc, i, pt, output_stream, verbosity_level);
+    i       = pt[i];
+  }
+  for (i = 1; sn[i] != sn[length]; i++) {
+    if (sn[i] != sn[pt[i]]) {
+      energy += vc->params->DuplexInit;
+      break;
+    }
+  }
+
+  return energy;
+}
+
+
+func vrna_sc_prepare(sequence string) {
+	prepare_sc_up_mfe(sequence, options);
+	prepare_sc_bp_mfe(sequence, options);
+}
+
+var sc_up_storage []int /**<  @brief  Storage container for energy contributions per unpaired nucleotide */
+var sc_energy_up [][]int /**<  @brief Energy contribution for stretches of unpaired nucleotides */
+var sc_energy_bp []int /**<  @brief Energy contribution for base pairs */
+
+/* populate sc->energy_up arrays for usage in MFE computations */
+func prepare_sc_up_mfe(sequence string) {
+  var  i, n uint64
+  n = len(sequence)
+	/* prepare sc for unpaired nucleotides only if we actually have some to apply */
+	// if (sc->state & STATE_DIRTY_UP_MFE) {
+	/*  allocate memory such that we can access the soft constraint
+	*  energies of a subsequence of length j starting at position i
+	*  via sc->energy_up[i][j]
+	*/
+	sc_energy_up = make([][]int, n + 2)
+	// (int **)vrna_realloc(sc->energy_up, sizeof(int *) * (n + 2));
+
+
+	for i := 0; i < n; i++ {
+		sc_energy_up[i] = make([]int, n - i + 2)
+	}
+	// sc->energy_up[i] = (int *)vrna_realloc(sc->energy_up[i], sizeof(int) * (n - i + 2));
+
+
+	sc_energy_up[0] = make([]int, 1)
+	sc_energy_up[n + 1] = make([]int, 1)
+	// sc->energy_up[0]     = (int *)vrna_realloc(sc->energy_up[0], sizeof(int));
+	// sc->energy_up[n + 1] = (int *)vrna_realloc(sc->energy_up[n + 1], sizeof(int));
+
+	/* now add soft constraints as stored in container for unpaired sc */
+	for i := 1; i <= n; i++ {
+		populate_sc_up_mfe(fc, i, (n - i + 1))
+	}
+
+	sc_energy_up[0][0]     = 0;
+	sc_energy_up[n + 1][0] = 0;
+
+
+		// sc->state &= ~STATE_DIRTY_UP_MFE;
+	// }
+}
+
+
+/* pupulate sc->energy_up array at position i from sc->up_storage data */
+func populate_sc_up_mfe(i, n uint64) {
+  sc_energy_up[i][0] = 0
+  for j := 1; j <= n; j++ {
+		sc_energy_up[i][j] = sc_energy_up[i][j - 1] + sc_up_storage[i + j - 1]
+	}
+}
+
+/* populate sc->energy_bp arrays for usage in MFE computations */
+func prepare_sc_bp_mfe(sequence string) {
+  var i, n uint64
+  n = len(sequence)
+
+	/* prepare sc for base paired positions only if we actually have some to apply */
+	// if (sc->bp_storage) {
+	// if (sc->state & STATE_DIRTY_BP_MFE) {
+
+	sc_energy_bp = make([]int, (((n + 1) * (n + 2)) / 2))
+		// (int *)vrna_realloc(sc->energy_bp, sizeof(int) * (((n + 1) * (n + 2)) / 2));
+
+	for i = 1; i < n; i++ {
+		populate_sc_bp_mfe(fc, i, n)
+	}
+
+		// sc->state &= ~STATE_DIRTY_BP_MFE;
+	// }
+	// } else {
+	// 	free_sc_bp(sc);
+	// }
+}
+
+var jindx []int /**<  @brief  DP matrix accessor  */
+
+type vrna_sc_bp_storage_t struct {
+  interval_start, interval_end uint64
+  e int
+}
+
+var sc_bp_storage [][]vrna_sc_bp_storage_t    /**<  @brief  Storage container for energy contributions per base pair */
+
+
+func populate_sc_bp_mfe(sequence string, i, maxdist uint64) {
+	var  j, k, turn, n uint64
+	var e int
+	var idx []int
+
+	n     = len(sequence)
+	turn  = 3 // could be 0?
+	idx   = jindx
+
+	if sc_bp_storage[i] {
+		// for (k = turn + 1; k < maxdist; k++) {
+		// 	j = i + k;
+
+		// 	if (j > n)
+		// 		break;
+
+		// 	e = get_stored_bp_contributions(sc->bp_storage[i], j);
+
+		// 	switch (sc->type) {
+		// 		case VRNA_SC_DEFAULT:
+		// 			sc->energy_bp[idx[j] + i] = e;
+		// 			break;
+
+		// 		case VRNA_SC_WINDOW:
+		// 			sc->energy_bp_local[i][j - i] = e;
+		// 			break;
+		// 		}
+		// }
+	} else {
+		for k = turn + 1; k < maxdist; k++ {
+			j = i + k
+			if j > n {
+				break
+			}
+
+			sc_energy_bp[idx[j] + i] = 0
+		}
+	}
 }
