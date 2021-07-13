@@ -467,12 +467,9 @@ func multiLoop(pc *parseCompound, closingFivePrimeIdx int,
 		}
 	}
 
-	substructuresFivePrimeIdx, substructuresThreePrimeIdx := stem.EnclosedFivePrimeIdx+1, stem.EnclosedThreePrimeIdx-1
 	return MultiLoop{
-		Stem:                       stem,
-		SubstructuresFivePrimeIdx:  substructuresFivePrimeIdx,
-		SubstructuresThreePrimeIdx: substructuresThreePrimeIdx,
-		Substructures:              substructures,
+		Stem:          stem,
+		Substructures: substructures,
 		// Substructures: SecondaryStructure{
 		// 	Structures: substructures,
 		// 	Length:     substructuresThreePrimeIdx - substructuresFivePrimeIdx + 1,
@@ -482,7 +479,7 @@ func multiLoop(pc *parseCompound, closingFivePrimeIdx int,
 
 /************************************************************************
 
-The following are functions to help test the code the `FromDotBracket` function.
+The following are functions to help test the `FromDotBracket` function.
 
 They are for internal use only, but also serve as an example for how to parse
 a `SecondaryStructure` recursively.
@@ -502,37 +499,28 @@ func dotBracketFromSecondaryStructure(secondaryStructure SecondaryStructure) str
 // of the original `SecondaryStructure`, but when we process a `MultiLoop`
 // recursively, we need to get the relative reference for the indexes for the
 // output.
-func dotBracketFromStructures(structures []interface{}, dotBracket *[]byte) string {
+func dotBracketFromStructures(structures []interface{}, dotBracketStructure *[]byte) string {
 
 	for _, structure := range structures {
 		switch structure := structure.(type) {
 		case SingleStrandedRegion:
 			for i := structure.FivePrimeIdx; i <= structure.ThreePrimeIdx; i++ {
-				(*dotBracket)[i] = dotBracketUnpairedNucleotide
+				(*dotBracketStructure)[i] = dotBracketUnpairedNucleotide
 			}
 		case MultiLoop:
-			dotBracketFromStem(dotBracket, structure.Stem)
-			// substructuresDotBracket := doDotBracketFromSecondaryStructure(structure.Substructures, structure.SubstructuresFivePrimeIdx)
-			// lenSubstructuresDotBracket := len(substructuresDotBracket)
-			// if lenSubstructuresDotBracket != structure.SubstructuresThreePrimeIdx-structure.SubstructuresFivePrimeIdx+1 {
-			// 	panic("len of dot bracket from substructures != len substructure")
-			// }
-			// for i, j := structure.SubstructuresFivePrimeIdx, 0; i <= structure.SubstructuresThreePrimeIdx; i++ {
-			// 	(*dotBracket)[i] = substructuresDotBracket[j]
-			// 	j++
-			// }
-			dotBracketFromStructures(structure.Substructures, dotBracket)
+			dotBracketFromStem(dotBracketStructure, structure.Stem)
+			dotBracketFromStructures(structure.Substructures, dotBracketStructure)
 		case Hairpin:
-			dotBracketFromStem(dotBracket, structure.Stem)
+			dotBracketFromStem(dotBracketStructure, structure.Stem)
 			if structure.SingleStrandedFivePrimeIdx != -1 {
 				for i := structure.SingleStrandedFivePrimeIdx; i <= structure.SingleStrandedThreePrimeIdx; i++ {
-					(*dotBracket)[i] = dotBracketUnpairedNucleotide
+					(*dotBracketStructure)[i] = dotBracketUnpairedNucleotide
 				}
 			}
 		}
 	}
 
-	return string(*dotBracket)
+	return string(*dotBracketStructure)
 }
 
 func dotBracketFromStem(dotBracket *[]byte, stem Stem) {
